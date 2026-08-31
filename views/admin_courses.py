@@ -118,25 +118,86 @@ for course in courses:
         modules = list(modules_col().find({"course_id": cid}).sort("order", 1))
         for module in modules:
             mid = str(module["_id"])
-            mod_col1, mod_col2 = st.columns([5, 1])
+            mod_col1, mod_col2, mod_col3 = st.columns([4, 1, 1])
             with mod_col1:
                 st.markdown(f"**{module['title']}**")
             with mod_col2:
-                if st.button("🗑 Delete module", key=f"delmod_{mid}"):
+                if st.button("✏️ Edit", key=f"editmod_btn_{mid}"):
+                    st.session_state[f"editing_mod_{mid}"] = not st.session_state.get(f"editing_mod_{mid}", False)
+                    st.rerun()
+            with mod_col3:
+                if st.button("🗑 Delete", key=f"delmod_{mid}"):
                     lessons_col().delete_many({"module_id": mid})
                     modules_col().delete_one({"_id": module["_id"]})
                     st.rerun()
 
+            if st.session_state.get(f"editing_mod_{mid}", False):
+                with st.form(f"edit_module_form_{mid}"):
+                    new_mod_title = st.text_input("Module title", value=module["title"], key=f"modtitle_{mid}")
+                    save_col, cancel_col = st.columns(2)
+                    with save_col:
+                        if st.form_submit_button("Save module", use_container_width=True):
+                            modules_col().update_one({"_id": module["_id"]}, {"$set": {"title": new_mod_title}})
+                            st.session_state[f"editing_mod_{mid}"] = False
+                            st.rerun()
+                    with cancel_col:
+                        if st.form_submit_button("Cancel", use_container_width=True):
+                            st.session_state[f"editing_mod_{mid}"] = False
+                            st.rerun()
+
             lessons = list(lessons_col().find({"module_id": mid}).sort("order", 1))
             for lesson in lessons:
                 lid = str(lesson["_id"])
-                les_col1, les_col2 = st.columns([5, 1])
+                les_col1, les_col2, les_col3 = st.columns([4, 1, 1])
                 with les_col1:
                     st.caption(f"• {lesson['title']} — youtube: {lesson.get('youtube_id', '—')}")
                 with les_col2:
+                    if st.button("✏️", key=f"editlesson_btn_{lid}", help="Edit this lesson"):
+                        st.session_state[f"editing_lesson_{lid}"] = not st.session_state.get(f"editing_lesson_{lid}", False)
+                        st.rerun()
+                with les_col3:
                     if st.button("🗑", key=f"dellesson_{lid}", help="Delete this lesson"):
                         lessons_col().delete_one({"_id": lesson["_id"]})
                         st.rerun()
+
+                if st.session_state.get(f"editing_lesson_{lid}", False):
+                    with st.form(f"edit_lesson_form_{lid}"):
+                        e_title = st.text_input("Lesson title", value=lesson["title"], key=f"elt_{lid}")
+                        e_yt = st.text_input(
+                            "YouTube video ID (the part after v=)",
+                            value=lesson.get("youtube_id", ""),
+                            key=f"eyt_{lid}",
+                        )
+                        e_ppt = st.text_input(
+                            "Slides link (PPT/Drive/GitHub)", value=lesson.get("ppt_link", ""), key=f"eppt_{lid}"
+                        )
+                        e_colab = st.text_input(
+                            "Colab notebook link", value=lesson.get("colab_link", ""), key=f"ecolab_{lid}"
+                        )
+                        e_dataset = st.text_input(
+                            "Dataset link", value=lesson.get("dataset_link", ""), key=f"eds_{lid}"
+                        )
+                        save_col, cancel_col = st.columns(2)
+                        with save_col:
+                            if st.form_submit_button("Save lesson", use_container_width=True):
+                                lessons_col().update_one(
+                                    {"_id": lesson["_id"]},
+                                    {
+                                        "$set": {
+                                            "title": e_title,
+                                            "youtube_id": e_yt.strip(),
+                                            "ppt_link": e_ppt.strip(),
+                                            "colab_link": e_colab.strip(),
+                                            "dataset_link": e_dataset.strip(),
+                                        }
+                                    },
+                                )
+                                st.session_state[f"editing_lesson_{lid}"] = False
+                                st.rerun()
+                        with cancel_col:
+                            if st.form_submit_button("Cancel", use_container_width=True):
+                                st.session_state[f"editing_lesson_{lid}"] = False
+                                st.rerun()
 
             with st.form(f"new_lesson_{mid}"):
                 l_title = st.text_input("Lesson title", key=f"lt_{mid}")
