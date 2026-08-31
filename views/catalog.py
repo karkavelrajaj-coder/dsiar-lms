@@ -25,7 +25,10 @@ for i, course in enumerate(courses):
     with cols[i % 3]:
         with st.container(border=True):
             if course.get("thumbnail_url"):
-                st.image(course["thumbnail_url"], use_container_width=True)
+                try:
+                    st.image(course["thumbnail_url"], use_container_width=True)
+                except Exception:
+                    st.caption("⚠️ Thumbnail couldn't be loaded — check the URL in Manage Courses.")
             st.subheader(course["title"])
             st.caption(course.get("category", ""))
             st.write(course.get("description", ""))
