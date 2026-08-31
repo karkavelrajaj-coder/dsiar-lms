@@ -67,11 +67,29 @@ for course in courses:
             title = st.text_input("Title", value=course["title"], key=f"t_{cid}")
             description = st.text_area("Description", value=course.get("description", ""), key=f"d_{cid}")
             thumbnail_url = st.text_input("Thumbnail URL", value=course.get("thumbnail_url", ""), key=f"th_{cid}")
-            if st.form_submit_button("Save changes"):
-                courses_col().update_one(
-                    {"_id": course["_id"]},
-                    {"$set": {"title": title, "description": description, "thumbnail_url": thumbnail_url}},
+
+            new_instructor_id = course.get("instructor_id")
+            if user["role"] == "admin":
+                instructors = list(users_col().find({"role": "instructor"}))
+                options = {"— Unassigned (admin managed) —": None}
+                options.update({i["name"]: str(i["_id"]) for i in instructors})
+                current_id = course.get("instructor_id")
+                id_to_name = {v: k for k, v in options.items()}
+                current_label = id_to_name.get(current_id, "— Unassigned (admin managed) —")
+                labels = list(options.keys())
+                chosen = st.selectbox(
+                    "Assign to instructor",
+                    labels,
+                    index=labels.index(current_label) if current_label in labels else 0,
+                    key=f"instr_{cid}",
                 )
+                new_instructor_id = options[chosen]
+
+            if st.form_submit_button("Save changes"):
+                update = {"title": title, "description": description, "thumbnail_url": thumbnail_url}
+                if user["role"] == "admin":
+                    update["instructor_id"] = new_instructor_id
+                courses_col().update_one({"_id": course["_id"]}, {"$set": update})
                 st.success("Saved.")
                 st.rerun()
 
