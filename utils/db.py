@@ -53,10 +53,28 @@ def enrollments_col():
 
 
 def ensure_indexes():
-    """Call once at startup to create useful indexes (idempotent)."""
-    users_col().create_index("email", unique=True)
-    modules_col().create_index("course_id")
-    lessons_col().create_index("module_id")
-    enrollments_col().create_index([("user_id", 1), ("course_id", 1)], unique=True)
-    progress_col().create_index([("user_id", 1), ("lesson_id", 1)], unique=True)
-    submissions_col().create_index([("assignment_id", 1), ("user_id", 1)])
+    """Call once at startup to create useful indexes (idempotent).
+
+    Wrapped in try/except so a leftover duplicate from a previous failed
+    startup (e.g. a network blip during the very first boot) can't crash
+    the whole app on every subsequent run. If index creation fails, the app
+    still starts; fix the underlying duplicate data in Atlas when you can.
+    """
+    from pymongo.errors import DuplicateKeyError, OperationFailure
+
+    index_specs = [
+        (users_col, "email", {"unique": True}),
+        (modules_col, "course_id", {}),
+        (lessons_col, "module_id", {}),
+        (enrollments_col, [("user_id", 1), ("course_id", 1)], {"unique": True}),
+        (progress_col, [("user_id", 1), ("lesson_id", 1)], {"unique": True}),
+        (submissions_col, [("assignment_id", 1), ("user_id", 1)], {}),
+    ]
+    for col_fn, keys, kwargs in index_specs:
+        try:
+            col_fn().create_index(keys, **kwargs)
+        except (DuplicateKeyError, OperationFailure):
+            # Existing duplicate data is blocking a unique index build.
+            # Skip it for now rather than crash the app; clean up the
+            # duplicates in Atlas Data Explorer and reboot to retry.
+            pass
