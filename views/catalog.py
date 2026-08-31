@@ -35,8 +35,11 @@ for i, course in enumerate(courses):
 
             if cid in my_enrollments:
                 st.success("Enrolled")
+            elif user["role"] == "student":
+                st.caption("🔒 Not enrolled — contact D'siar Tech to purchase access.")
             else:
-                if st.button("Enroll", key=f"enroll_{cid}", use_container_width=True):
+                # Admins/instructors can self-enroll to preview course content.
+                if st.button("Enroll (preview)", key=f"enroll_{cid}", use_container_width=True):
                     enrollments_col().insert_one(
                         {
                             "user_id": user["id"],
