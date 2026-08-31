@@ -100,10 +100,25 @@ for course in courses:
         modules = list(modules_col().find({"course_id": cid}).sort("order", 1))
         for module in modules:
             mid = str(module["_id"])
-            st.markdown(f"**{module['title']}**")
+            mod_col1, mod_col2 = st.columns([5, 1])
+            with mod_col1:
+                st.markdown(f"**{module['title']}**")
+            with mod_col2:
+                if st.button("🗑 Delete module", key=f"delmod_{mid}"):
+                    lessons_col().delete_many({"module_id": mid})
+                    modules_col().delete_one({"_id": module["_id"]})
+                    st.rerun()
+
             lessons = list(lessons_col().find({"module_id": mid}).sort("order", 1))
             for lesson in lessons:
-                st.caption(f"• {lesson['title']} — youtube: {lesson.get('youtube_id', '—')}")
+                lid = str(lesson["_id"])
+                les_col1, les_col2 = st.columns([5, 1])
+                with les_col1:
+                    st.caption(f"• {lesson['title']} — youtube: {lesson.get('youtube_id', '—')}")
+                with les_col2:
+                    if st.button("🗑", key=f"dellesson_{lid}", help="Delete this lesson"):
+                        lessons_col().delete_one({"_id": lesson["_id"]})
+                        st.rerun()
 
             with st.form(f"new_lesson_{mid}"):
                 l_title = st.text_input("Lesson title", key=f"lt_{mid}")
