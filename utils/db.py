@@ -52,6 +52,10 @@ def enrollments_col():
     return get_db()["enrollments"]
 
 
+def certificates_col():
+    return get_db()["certificates"]
+
+
 def ensure_indexes():
     """Call once at startup to create useful indexes (idempotent).
 
@@ -69,6 +73,7 @@ def ensure_indexes():
         (enrollments_col, [("user_id", 1), ("course_id", 1)], {"unique": True}),
         (progress_col, [("user_id", 1), ("lesson_id", 1)], {"unique": True}),
         (submissions_col, [("assignment_id", 1), ("user_id", 1)], {}),
+        (certificates_col, [("user_id", 1), ("course_id", 1)], {"unique": True}),
     ]
     for col_fn, keys, kwargs in index_specs:
         try:
