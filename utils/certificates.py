@@ -13,6 +13,8 @@ duplicates — it just returns the existing certificate once one exists.
 import uuid
 from datetime import datetime, timezone
 
+from pymongo.errors import DuplicateKeyError
+
 from utils.db import (
     assignments_col,
     certificates_col,
@@ -52,7 +54,13 @@ def is_eligible(user_id: str, course_id: str) -> bool:
 
 def ensure_certificate(user_id: str, course_id: str):
     """Issue a certificate if eligible and not already issued. Returns the
-    certificate document either way, or None if not yet eligible."""
+    certificate document either way, or None if not yet eligible.
+
+    cert_id is a random 12-char hex string. A collision is astronomically
+    unlikely (48 bits of randomness), but since it's enforced as a unique
+    index at the database level, we retry with a fresh id a few times
+    rather than letting a freak collision crash the page.
+    """
     existing = certificates_col().find_one({"user_id": user_id, "course_id": course_id})
     if existing:
         return existing
@@ -60,11 +68,24 @@ def ensure_certificate(user_id: str, course_id: str):
     if not is_eligible(user_id, course_id):
         return None
 
-    cert = {
-        "user_id": user_id,
-        "course_id": course_id,
-        "cert_id": uuid.uuid4().hex[:12].upper(),
-        "issued_at": datetime.now(timezone.utc),
-    }
-    certificates_col().insert_one(cert)
-    return cert
+    for attempt in range(5):
+        cert = {
+            "user_id": user_id,
+            "course_id": course_id,
+            "cert_id": uuid.uuid4().hex[:12].upper(),
+            "issued_at": datetime.now(timezone.utc),
+        }
+        try:
+            certificates_col().insert_one(cert)
+            return cert
+        except DuplicateKeyError:
+            # Could be a genuine cert_id collision (vanishingly rare), OR a
+            # race: another request issued the (user_id, course_id) cert
+            # between our find_one above and this insert. Check for that
+            # second case first — if so, just return the one that now exists.
+            existing = certificates_col().find_one({"user_id": user_id, "course_id": course_id})
+            if existing:
+                return existing
+            continue  # genuine cert_id collision — loop and try a new random id
+
+    raise RuntimeError("Could not generate a unique certificate ID after 5 attempts.")
