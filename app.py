@@ -28,6 +28,7 @@ student_pages = [
     st.Page("views/my_learning.py", title="My Learning", icon="🎓"),
     st.Page("views/course_player.py", title="Course Player", icon="▶️"),
     st.Page("views/assignments.py", title="Assignments", icon="📝"),
+    st.Page("views/certificates.py", title="Certificates", icon="🏆"),
 ]
 
 instructor_pages = [
