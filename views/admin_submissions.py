@@ -2,6 +2,7 @@ import streamlit as st
 from bson import ObjectId
 
 from utils.auth import require_role
+from utils.certificates import ensure_certificate
 from utils.db import assignments_col, courses_col, submissions_col, users_col
 
 user = require_role("admin", "instructor")
@@ -103,19 +104,37 @@ for a in assignments:
             st.markdown("###### Submissions to grade")
             for s in subs:
                 student = users_col().find_one({"_id": ObjectId(s["user_id"])})
+                status = s.get("status", "pending")
+                status_badge = {"approved": "✅ Approved", "rejected": "❌ Needs revision", "pending": "⏳ Pending"}
                 with st.container(border=True):
                     st.write(f"Student: {student['name'] if student else 'Unknown'}")
                     st.write(f"Submission: {s['link_or_text']}")
+                    st.caption(status_badge.get(status, "⏳ Pending"))
                     with st.form(f"grade_{s['_id']}"):
                         grade = st.number_input(
                             "Grade (0-100)", min_value=0, max_value=100,
                             value=int(s["grade"]) if s.get("grade") is not None else 0,
                             key=f"g_{s['_id']}",
                         )
+                        new_status = st.selectbox(
+                            "Status",
+                            ["pending", "approved", "rejected"],
+                            index=["pending", "approved", "rejected"].index(status),
+                            key=f"status_{s['_id']}",
+                            help="Approving triggers automatic certificate issuance once the student has also completed every lesson in the course.",
+                        )
                         feedback = st.text_area("Feedback", value=s.get("feedback", ""), key=f"f_{s['_id']}")
                         if st.form_submit_button("Save grade"):
                             submissions_col().update_one(
-                                {"_id": s["_id"]}, {"$set": {"grade": grade, "feedback": feedback}}
+                                {"_id": s["_id"]},
+                                {"$set": {"grade": grade, "feedback": feedback, "status": new_status}},
                             )
-                            st.success("Grade saved.")
+                            if new_status == "approved":
+                                cert = ensure_certificate(s["user_id"], a["course_id"])
+                                if cert:
+                                    st.success("Grade saved and certificate issued to the student! 🎓")
+                                else:
+                                    st.success("Grade saved. Approved — certificate will issue once all lessons are also completed.")
+                            else:
+                                st.success("Grade saved.")
                             st.rerun()
