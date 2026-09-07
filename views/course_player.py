@@ -4,6 +4,7 @@ import streamlit as st
 from bson import ObjectId
 
 from utils.auth import require_role
+from utils.certificates import ensure_certificate
 from utils.db import courses_col, enrollments_col, lessons_col, modules_col, progress_col
 
 user = require_role("student", "instructor", "admin")
@@ -72,5 +73,9 @@ for module in modules:
                         },
                         upsert=True,
                     )
+                    cert = ensure_certificate(user["id"], course_id)
+                    if cert:
+                        st.balloons()
+                        st.success("🎓 Course complete and assignment approved — your certificate is ready! Check My Learning.")
                     st.rerun()
             st.divider()
