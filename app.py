@@ -29,11 +29,13 @@ student_pages = [
     st.Page("views/course_player.py", title="Course Player", icon="▶️"),
     st.Page("views/assignments.py", title="Assignments", icon="📝"),
     st.Page("views/certificates.py", title="Certificates", icon="🏆"),
+    st.Page("views/live_sessions.py", title="Live Sessions", icon="🎥"),
 ]
 
 instructor_pages = [
     st.Page("views/admin_courses.py", title="Manage Courses", icon="🛠️", default=(user["role"] == "instructor")),
     st.Page("views/admin_submissions.py", title="Assignments & Grading", icon="📥"),
+    st.Page("views/admin_live_sessions.py", title="Manage Live Sessions", icon="🗓️"),
 ]
 
 admin_only_pages = [
