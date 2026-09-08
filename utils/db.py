@@ -56,6 +56,10 @@ def certificates_col():
     return get_db()["certificates"]
 
 
+def live_sessions_col():
+    return get_db()["live_sessions"]
+
+
 def ensure_indexes():
     """Call once at startup to create useful indexes (idempotent).
 
@@ -75,6 +79,8 @@ def ensure_indexes():
         (submissions_col, [("assignment_id", 1), ("user_id", 1)], {}),
         (certificates_col, [("user_id", 1), ("course_id", 1)], {"unique": True}),
         (certificates_col, "cert_id", {"unique": True}),
+        (live_sessions_col, "course_id", {}),
+        (live_sessions_col, "room_name", {"unique": True}),
     ]
     for col_fn, keys, kwargs in index_specs:
         try:
