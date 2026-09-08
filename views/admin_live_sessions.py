@@ -4,13 +4,22 @@ import streamlit as st
 from bson import ObjectId
 
 from utils.auth import require_role
+from utils.daily_video import create_room, end_room_now
 from utils.db import courses_col, live_sessions_col
-from utils.live_sessions import generate_room_name, render_room, session_status
+from utils.live_sessions import generate_room_name, render_room, room_expiry_for, session_status
 
 user = require_role("admin", "instructor")
 
 st.title("🎥 Manage live sessions")
 st.caption("Admins schedule for every course. Instructors only schedule for courses assigned to them.")
+
+if "DAILY_API_KEY" not in st.secrets:
+    st.error(
+        "DAILY_API_KEY isn't set in secrets yet. Sign up free at https://dashboard.daily.co "
+        "(no credit card needed), grab your API key from the Developers tab, and add it to "
+        "Streamlit secrets before scheduling sessions."
+    )
+    st.stop()
 
 # --- Scope courses by role, same pattern as Manage Courses -------------------
 if user["role"] == "admin":
@@ -42,6 +51,9 @@ with st.expander("➕ Schedule a new live session"):
                 st.error("Give the session a title.")
             else:
                 scheduled_at = datetime.combine(session_date, session_time).replace(tzinfo=timezone.utc)
+                # The Daily room itself is created lazily when the host actually
+                # starts it, not here — avoids piling up unused rooms on the
+                # free tier for sessions that get rescheduled or cancelled.
                 live_sessions_col().insert_one(
                     {
                         "course_id": course_map[course_name],
@@ -50,6 +62,7 @@ with st.expander("➕ Schedule a new live session"):
                         "scheduled_at": scheduled_at,
                         "duration_minutes": int(duration_minutes),
                         "room_name": generate_room_name(),
+                        "room_url": None,
                         "host_id": user["id"],
                         "host_name": user["name"],
                         "created_at": datetime.now(timezone.utc),
@@ -134,46 +147,59 @@ for s in sessions:
 
         started_at = s.get("started_at")
         ended_at = s.get("ended_at")
+        room_url = s.get("room_url")
 
         if ended_at:
-            st.caption(f"✅ Marked finished by host at {ended_at.strftime('%I:%M %p UTC')}.")
+            st.caption(f"✅ Ended at {ended_at.strftime('%I:%M %p UTC')}.")
         elif started_at:
             st.caption(f"🟢 Started at {started_at.strftime('%I:%M %p UTC')} — students can now join.")
         else:
             st.caption("⏳ Not started yet — students won't see an active Join button until you start it.")
 
-        st.caption(f"Room: `{s['room_name']}` (share only with enrolled students — this link isn't public)")
-
         hostjoin_key = f"hostjoined_{sid}"
         if not st.session_state.get(hostjoin_key, False):
-            join_label = "▶️ Start / rejoin session" if not ended_at else "▶️ Reopen session"
-            if st.button(join_label, key=f"hostjoin_{sid}"):
-                if not started_at:
-                    live_sessions_col().update_one(
-                        {"_id": s["_id"]}, {"$set": {"started_at": datetime.now(timezone.utc)}}
-                    )
-                if ended_at:
-                    # Reopening after marking finished — clear the finished flag.
-                    live_sessions_col().update_one({"_id": s["_id"]}, {"$unset": {"ended_at": ""}})
-                st.session_state[hostjoin_key] = True
-                st.rerun()
+            btn_label = "🔁 Start a new session" if ended_at else "▶️ Start / rejoin session"
+            if st.button(btn_label, key=f"hostjoin_{sid}"):
+                try:
+                    if ended_at or not room_url:
+                        # First start, or restarting after a previous end —
+                        # either way, create a fresh Daily room.
+                        new_room_name = generate_room_name() if ended_at else s["room_name"]
+                        expiry = room_expiry_for(s["scheduled_at"], s["duration_minutes"])
+                        new_room_url = create_room(new_room_name, expiry)
+                        live_sessions_col().update_one(
+                            {"_id": s["_id"]},
+                            {
+                                "$set": {
+                                    "room_name": new_room_name,
+                                    "room_url": new_room_url,
+                                    "started_at": datetime.now(timezone.utc),
+                                },
+                                "$unset": {"ended_at": ""},
+                            },
+                        )
+                    st.session_state[hostjoin_key] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't create the video room: {e}")
         else:
-            render_room(s["room_name"], user["name"], show_end_button=True)
+            # Refetch in case this is a fresh room just created above.
+            current = live_sessions_col().find_one({"_id": s["_id"]})
+            render_room(current["room_url"])
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
                 if st.button("Leave (keep session open)", key=f"hostleave_{sid}"):
                     st.session_state[hostjoin_key] = False
                     st.rerun()
             with btn_col2:
-                if st.button("🏁 Mark session as finished", key=f"hostfinish_{sid}"):
+                if st.button("🔴 End session for everyone", key=f"hostend_{sid}"):
+                    try:
+                        end_room_now(current["room_name"])
+                    except Exception as e:
+                        st.warning(f"Room may already be closed ({e}) — marking it finished anyway.")
                     live_sessions_col().update_one(
                         {"_id": s["_id"]}, {"$set": {"ended_at": datetime.now(timezone.utc)}}
                     )
                     st.session_state[hostjoin_key] = False
-                    st.success("Marked finished. Students will no longer be able to join this session.")
+                    st.success("Session ended for everyone — all participants have been disconnected.")
                     st.rerun()
-            st.caption(
-                "Use the red '🔴 End session for everyone' button above to disconnect everyone from the "
-                "video call itself, then '🏁 Mark session as finished' here so students stop seeing an "
-                "active Join button too — they're two separate things."
-            )
