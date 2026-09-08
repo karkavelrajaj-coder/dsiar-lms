@@ -52,7 +52,7 @@ for s in sessions:
             else:
                 st.caption(reason)
         else:
-            render_room(s["room_name"], user["name"])
+            render_room(s["room_url"])
             if st.button("Leave session", key=f"leave_{sid}"):
                 st.session_state[joined_key] = False
                 st.rerun()
