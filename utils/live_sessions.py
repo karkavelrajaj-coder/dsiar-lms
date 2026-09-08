@@ -1,21 +1,29 @@
-"""Helpers for live session scheduling: room name generation and the join
-time window (when the 'Join' button should actually be clickable)."""
+"""Helpers for live session scheduling: room naming, timing windows, and
+the embedded room itself.
+
+Uses Daily.co (see utils/daily_video.py) instead of Jitsi's free public
+server. Rooms are created with a private, server-side API key that never
+reaches the browser — students and hosts alike just get a URL and join
+directly, with no login screen for anyone.
+"""
 
 import uuid
 from datetime import datetime, timedelta, timezone
 
 JOIN_OPENS_MINUTES_BEFORE = 10
 JOIN_STAYS_OPEN_MINUTES_AFTER_END = 30
+ROOM_LIFETIME_BUFFER_HOURS = 6  # auto-cleanup safety net if a host forgets to end it
 
 
 def generate_room_name() -> str:
-    """A random, unguessable Jitsi room name — never derived from the
-    course or session title, so it can't be guessed or brute-forced."""
+    """A random, unguessable room name — Daily room names must be URL-safe
+    (lowercase letters, numbers, hyphens), so no uppercase/underscores."""
     return f"dsiar-{uuid.uuid4().hex[:16]}"
 
 
 def session_status(scheduled_at: datetime, duration_minutes: int) -> str:
-    """Returns 'upcoming', 'live', or 'ended' relative to now."""
+    """Returns 'upcoming', 'live', or 'ended' relative to now — a display
+    label only, independent of the actual started_at/ended_at gating."""
     now = datetime.now(timezone.utc)
     if scheduled_at.tzinfo is None:
         scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
@@ -43,11 +51,8 @@ def can_student_join(session: dict) -> tuple[bool, str]:
     human-readable reason if not.
 
     Students can only join once the HOST has actually started the session
-    (tracked via started_at, set the moment the host opens the room) — not
-    just because the scheduled time has arrived. This matters both so
-    students never sit alone in an empty room, and so the host reliably
-    holds Jitsi's moderator role (meet.jit.si assigns it to whoever's
-    browser joins first).
+    (tracked via started_at) — not just because the scheduled time has
+    arrived. This keeps students from sitting alone in an empty room.
     """
     if session.get("ended_at"):
         return False, "This session has been marked finished by the host."
@@ -55,80 +60,33 @@ def can_student_join(session: dict) -> tuple[bool, str]:
         return False, "🔒 Join opens 10 minutes before the scheduled start time."
     if not session.get("started_at"):
         return False, "⏳ Waiting for the host to start this session — check back shortly."
+    if not session.get("room_url"):
+        return False, "Session isn't ready yet — try again in a moment."
     return True, ""
 
 
-def render_room(room_name: str, display_name: str, show_end_button: bool = False):
-    """Renders the embedded Jitsi room inline on the current page, using
-    Jitsi's JavaScript IFrame API (not a plain <iframe src=...>) so that,
-    for the host, an 'End session for everyone' button can be shown that
-    calls the real endConference command — this disconnects every
-    participant, not just the person who clicked it.
+def room_expiry_for(scheduled_at: datetime, duration_minutes: int) -> datetime:
+    """When Daily should auto-delete the room if nobody explicitly ends it."""
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+    return scheduled_at + timedelta(minutes=duration_minutes, hours=ROOM_LIFETIME_BUFFER_HOURS)
 
-    Caveat: on the free public meet.jit.si (no login), Jitsi assigns
-    "moderator" to whoever's browser joins the room first — not necessarily
-    whoever our app considers the host. The host should join first in
-    practice. If the button doesn't take effect (non-moderator), a fallback
-    message tells them to use Jitsi's own "End meeting for all" option in
-    the call's "..." menu instead, which requires the same moderator role
-    but is Jitsi's native control, not ours.
 
-    Screen sharing and the whiteboard are available in the call itself, no
-    extra setup needed. To record, the host can use free local screen
-    recording software (e.g. OBS Studio) and upload the result as a lesson
-    afterward — avoiding any need to expose a YouTube stream key.
+def render_room(room_url: str):
+    """Embeds the Daily.co room inline on the page. No login required for
+    anyone — the room URL itself is the access credential (kept
+    unguessable), same trust model as the certificate IDs and enrollment
+    links elsewhere in the app.
+
+    Screen sharing and chat are enabled on every room by default. To
+    record, the host can use free local screen recording software (e.g.
+    OBS Studio) and upload the result as a lesson afterward.
     """
-    import json
-
     import streamlit as st
     import streamlit.components.v1 as components
 
     st.caption(
-        "🎙️ Screen sharing and the whiteboard are built into the call. "
+        "🎙️ Screen sharing and chat are built into the call — no login needed for anyone. "
         "Hosts: record locally (e.g. OBS Studio) and add the upload as a lesson afterward."
     )
-
-    safe_room = json.dumps(room_name).replace("</", "<\\/")
-    safe_name = json.dumps(display_name).replace("</", "<\\/")
-
-    end_button_html = ""
-    end_button_js = ""
-    if show_end_button:
-        end_button_html = """
-        <button id="dsiar-end-btn" style="margin-top:10px;padding:9px 18px;
-            background:#b91c1c;color:white;border:none;border-radius:6px;
-            font-size:14px;cursor:pointer;">
-            🔴 End session for everyone
-        </button>
-        <div id="dsiar-end-note" style="margin-top:6px;font-size:12px;color:#888;"></div>
-        """
-        end_button_js = """
-        document.getElementById('dsiar-end-btn').addEventListener('click', function () {
-            if (confirm('End this session for everyone? All participants will be disconnected.')) {
-                try {
-                    api.executeCommand('endConference');
-                } catch (e) {
-                    document.getElementById('dsiar-end-note').innerText =
-                        "Couldn't end it from here (you may not hold the in-call moderator role). " +
-                        "Use the \\"End meeting for all\\" option in the call's ••• menu instead.";
-                }
-            }
-        });
-        """
-
-    html = f"""
-    <div id="dsiar-jitsi-container" style="height:620px;"></div>
-    {end_button_html}
-    <script src="https://meet.jit.si/external_api.js"></script>
-    <script>
-        const api = new JitsiMeetExternalAPI("meet.jit.si", {{
-            roomName: {safe_room},
-            parentNode: document.getElementById('dsiar-jitsi-container'),
-            width: "100%",
-            height: 620,
-            userInfo: {{ displayName: {safe_name} }}
-        }});
-        {end_button_js}
-    </script>
-    """
-    components.html(html, height=720)
+    components.iframe(room_url, height=650)
