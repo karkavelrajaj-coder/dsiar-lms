@@ -53,6 +53,13 @@ def create_room(room_name: str, expires_at: datetime) -> dict:
     the room — must use. `friendly_url` is just the readable label we chose;
     it is NOT accepted by those other endpoints.
 
+    A room does NOT automatically allow every role that exists at the team
+    level (attendee/moderator/speaker/student/teacher) — it defaults to
+    just moderator/speaker/attendee unless you explicitly list which roles
+    this specific room accepts. We need 'teacher' and 'student', so both
+    are passed here, with 'student' as the safe default for anyone whose
+    token somehow omits a role.
+
     expires_at: Digital Samba auto-deletes the room at this time even if
     nobody explicitly ends it — a safety net if a host forgets to.
     """
@@ -60,6 +67,8 @@ def create_room(room_name: str, expires_at: datetime) -> dict:
         "friendly_url": room_name,
         "privacy": "private",  # nobody joins without a signed per-person token
         "expires_at": expires_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "roles": ["teacher", "student"],
+        "default_role": "student",
     }
     resp = requests.post(f"{API_BASE}/rooms", json=payload, auth=_auth(), timeout=10)
     _raise_with_body(resp)
