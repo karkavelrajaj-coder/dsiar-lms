@@ -209,21 +209,20 @@ for s in sessions:
             btn_label = "🔁 Start a new session" if ended_at else "▶️ Start / rejoin session"
             if st.button(btn_label, key=f"hostjoin_{sid}"):
                 try:
-                    room_name = s["room_name"]
-                    if ended_at:
-                        # Previous room was deleted when ended — make a fresh one.
+                    needs_new_room = ended_at or not started_at or not s.get("room_id")
+                    if needs_new_room:
+                        # ALWAYS generate a brand-new unique name here — never
+                        # reuse s["room_name"], since that name may already
+                        # exist on Digital Samba's servers (friendly_url must
+                        # be globally unique) from an earlier attempt.
                         room_name = generate_room_name()
-                        live_sessions_col().update_one({"_id": s["_id"]}, {"$set": {"room_name": room_name}})
-                    if ended_at or not started_at or not s.get("room_id"):
-                        # The "not room_id" case self-heals any session created
-                        # before room_id was tracked (a bug fix) — it'll just
-                        # get a fresh room now instead of reusing a broken one.
                         expiry = room_expiry_for(s["scheduled_at"], s["duration_minutes"])
                         room = create_room(room_name, expiry)
                         live_sessions_col().update_one(
                             {"_id": s["_id"]},
                             {
                                 "$set": {
+                                    "room_name": room_name,
                                     "room_id": room["id"],
                                     "started_at": datetime.now(timezone.utc),
                                 },
