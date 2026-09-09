@@ -214,12 +214,21 @@ for s in sessions:
                         # Previous room was deleted when ended — make a fresh one.
                         room_name = generate_room_name()
                         live_sessions_col().update_one({"_id": s["_id"]}, {"$set": {"room_name": room_name}})
-                    if ended_at or not started_at:
+                    if ended_at or not started_at or not s.get("room_id"):
+                        # The "not room_id" case self-heals any session created
+                        # before room_id was tracked (a bug fix) — it'll just
+                        # get a fresh room now instead of reusing a broken one.
                         expiry = room_expiry_for(s["scheduled_at"], s["duration_minutes"])
-                        create_room(room_name, expiry)
+                        room = create_room(room_name, expiry)
                         live_sessions_col().update_one(
                             {"_id": s["_id"]},
-                            {"$set": {"started_at": datetime.now(timezone.utc)}, "$unset": {"ended_at": ""}},
+                            {
+                                "$set": {
+                                    "room_id": room["id"],
+                                    "started_at": datetime.now(timezone.utc),
+                                },
+                                "$unset": {"ended_at": ""},
+                            },
                         )
                     st.session_state[hostjoin_key] = True
                     st.rerun()
@@ -227,11 +236,14 @@ for s in sessions:
                     st.error(f"Couldn't create the video room: {e}")
         else:
             current = live_sessions_col().find_one({"_id": s["_id"]})
-            try:
-                join_link = generate_join_link(current["room_name"], user["name"], role="teacher")
-                render_host_room(join_link)
-            except Exception as e:
-                st.error(f"Couldn't generate your join link: {e}")
+            if not current.get("room_id"):
+                st.warning("This session was started before a bug fix — click 'Leave', then 'Start' again to repair it.")
+            else:
+                try:
+                    join_link = generate_join_link(current["room_id"], user["name"], role="teacher")
+                    render_host_room(join_link)
+                except Exception as e:
+                    st.error(f"Couldn't generate your join link: {e}")
 
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
@@ -240,10 +252,11 @@ for s in sessions:
                     st.rerun()
             with btn_col2:
                 if st.button("🔴 End session for everyone", key=f"hostend_{sid}"):
-                    try:
-                        end_room_now(current["room_name"])
-                    except Exception as e:
-                        st.warning(f"Room may already be closed ({e}) — marking it finished anyway.")
+                    if current.get("room_id"):
+                        try:
+                            end_room_now(current["room_id"])
+                        except Exception as e:
+                            st.warning(f"Room may already be closed ({e}) — marking it finished anyway.")
                     live_sessions_col().update_one(
                         {"_id": s["_id"]}, {"$set": {"ended_at": datetime.now(timezone.utc)}}
                     )
