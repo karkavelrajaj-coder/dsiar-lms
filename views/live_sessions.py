@@ -54,7 +54,7 @@ status_badge = {"upcoming": "🔵 Upcoming", "live": "🔴 Live now", "ended": "
 for s in sessions:
     sid = str(s["_id"])
     course = courses_col().find_one({"_id": ObjectId(s["course_id"])})
-    status = session_status(s["scheduled_at"], s["duration_minutes"])
+    status = session_status(s["scheduled_at"], s["duration_minutes"], s.get("ended_at"))
     original_tz = s.get("scheduled_tz", DEFAULT_TIMEZONE)
 
     with st.container(border=True):
