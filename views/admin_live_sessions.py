@@ -7,6 +7,16 @@ from utils.auth import require_role
 from utils.db import courses_col, live_sessions_col
 from utils.digital_samba_video import create_room, end_room_now, generate_join_link
 from utils.live_sessions import generate_room_name, render_host_room, room_expiry_for, session_status
+from utils.timezones import (
+    DEFAULT_TIMEZONE,
+    format_in_tz,
+    get_user_timezone,
+    local_input_to_utc,
+    set_user_timezone,
+    timezone_options,
+    tz_display_label,
+    utc_to_tz,
+)
 
 user = require_role("admin", "instructor")
 
@@ -20,6 +30,23 @@ if "DIGITALSAMBA_TEAM_ID" not in st.secrets or "DIGITALSAMBA_DEVELOPER_KEY" not 
         "find both values under the Team tab, and add them to Streamlit secrets."
     )
     st.stop()
+
+# --- This viewer's own display timezone, saved so it's remembered next visit -
+tz_opts = timezone_options()
+saved_view_tz = get_user_timezone(user["id"])
+if saved_view_tz not in tz_opts:
+    tz_opts = [saved_view_tz] + tz_opts
+
+view_tz = st.selectbox(
+    "🌐 View times in",
+    tz_opts,
+    index=tz_opts.index(saved_view_tz),
+    format_func=lambda z: tz_display_label(z),
+    key="admin_view_tz",
+)
+if view_tz != saved_view_tz:
+    set_user_timezone(user["id"], view_tz)
+    st.rerun()
 
 # --- Scope courses by role, same pattern as Manage Courses -------------------
 if user["role"] == "admin":
@@ -39,6 +66,14 @@ with st.expander("➕ Schedule a new live session"):
         course_name = st.selectbox("Course", list(course_map.keys()))
         title = st.text_input("Session title", placeholder="e.g. Live Q&A: Neural Networks")
         description = st.text_area("What will this session cover? (optional)")
+
+        schedule_tz = st.selectbox(
+            "Timezone for this session",
+            tz_opts,
+            index=tz_opts.index(view_tz),
+            format_func=lambda z: tz_display_label(z),
+            help="The date/time below are interpreted in this timezone — pick whichever zone makes sense for this particular class.",
+        )
         col1, col2 = st.columns(2)
         with col1:
             session_date = st.date_input("Date")
@@ -50,7 +85,7 @@ with st.expander("➕ Schedule a new live session"):
             if not title:
                 st.error("Give the session a title.")
             else:
-                scheduled_at = datetime.combine(session_date, session_time).replace(tzinfo=timezone.utc)
+                scheduled_at = local_input_to_utc(session_date, session_time, schedule_tz)
                 # The actual Digital Samba room is created lazily when the host
                 # starts it, not here — avoids piling up unused rooms for
                 # sessions that get rescheduled or cancelled.
@@ -60,6 +95,7 @@ with st.expander("➕ Schedule a new live session"):
                         "title": title,
                         "description": description,
                         "scheduled_at": scheduled_at,
+                        "scheduled_tz": schedule_tz,
                         "duration_minutes": int(duration_minutes),
                         "room_name": generate_room_name(),
                         "host_id": user["id"],
@@ -67,7 +103,7 @@ with st.expander("➕ Schedule a new live session"):
                         "created_at": datetime.now(timezone.utc),
                     }
                 )
-                st.success("Session scheduled.")
+                st.success(f"Session scheduled for {format_in_tz(scheduled_at, schedule_tz)}.")
                 st.rerun()
 
 st.divider()
@@ -86,15 +122,19 @@ status_badge = {"upcoming": "🔵 Upcoming", "live": "🔴 Live now", "ended": "
 for s in sessions:
     sid = str(s["_id"])
     status = session_status(s["scheduled_at"], s["duration_minutes"])
+    original_tz = s.get("scheduled_tz", DEFAULT_TIMEZONE)
 
     with st.container(border=True):
         head_col1, head_col2, head_col3 = st.columns([4, 1, 1])
         with head_col1:
             st.markdown(f"**{s['title']}**  ·  {status_badge[status]}")
+            time_line = format_in_tz(s["scheduled_at"], view_tz)
+            if view_tz != original_tz:
+                time_line += f"  (scheduled in {tz_display_label(original_tz)})"
             st.caption(
                 f"Course: {course_id_to_name.get(s['course_id'], 'Unknown')} · "
                 f"Host: {s.get('host_name', 'Unknown')} · "
-                f"{s['scheduled_at'].strftime('%b %d, %Y at %I:%M %p UTC')} · "
+                f"{time_line} · "
                 f"{s['duration_minutes']} min"
             )
             if s.get("description"):
@@ -112,11 +152,20 @@ for s in sessions:
             with st.form(f"edit_sess_form_{sid}"):
                 e_title = st.text_input("Session title", value=s["title"], key=f"est_{sid}")
                 e_desc = st.text_area("Description", value=s.get("description", ""), key=f"esd_{sid}")
+
+                e_tz = st.selectbox(
+                    "Timezone for this session",
+                    tz_opts,
+                    index=tz_opts.index(original_tz) if original_tz in tz_opts else 0,
+                    format_func=lambda z: tz_display_label(z),
+                    key=f"estz_{sid}",
+                )
+                local_current = utc_to_tz(s["scheduled_at"], original_tz)
                 col1, col2 = st.columns(2)
                 with col1:
-                    e_date = st.date_input("Date", value=s["scheduled_at"].date(), key=f"esdate_{sid}")
+                    e_date = st.date_input("Date", value=local_current.date(), key=f"esdate_{sid}")
                 with col2:
-                    e_time = st.time_input("Start time", value=s["scheduled_at"].time(), key=f"estime_{sid}")
+                    e_time = st.time_input("Start time", value=local_current.time(), key=f"estime_{sid}")
                 e_duration = st.number_input(
                     "Duration (minutes)", min_value=15, max_value=300,
                     value=s["duration_minutes"], step=15, key=f"esdur_{sid}",
@@ -124,7 +173,7 @@ for s in sessions:
                 save_col, cancel_col = st.columns(2)
                 with save_col:
                     if st.form_submit_button("Save changes", use_container_width=True):
-                        new_scheduled_at = datetime.combine(e_date, e_time).replace(tzinfo=timezone.utc)
+                        new_scheduled_at = local_input_to_utc(e_date, e_time, e_tz)
                         live_sessions_col().update_one(
                             {"_id": s["_id"]},
                             {
@@ -132,6 +181,7 @@ for s in sessions:
                                     "title": e_title,
                                     "description": e_desc,
                                     "scheduled_at": new_scheduled_at,
+                                    "scheduled_tz": e_tz,
                                     "duration_minutes": int(e_duration),
                                 }
                             },
@@ -148,9 +198,9 @@ for s in sessions:
         ended_at = s.get("ended_at")
 
         if ended_at:
-            st.caption(f"✅ Ended at {ended_at.strftime('%I:%M %p UTC')}.")
+            st.caption(f"✅ Ended at {format_in_tz(ended_at, view_tz)}.")
         elif started_at:
-            st.caption(f"🟢 Started at {started_at.strftime('%I:%M %p UTC')} — students can now join.")
+            st.caption(f"🟢 Started at {format_in_tz(started_at, view_tz)} — students can now join.")
         else:
             st.caption("⏳ Not started yet — students won't see an active Join button until you start it.")
 
