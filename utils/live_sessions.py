@@ -26,9 +26,14 @@ def generate_room_name() -> str:
     return f"dsiar-{uuid.uuid4().hex[:16]}"
 
 
-def session_status(scheduled_at: datetime, duration_minutes: int) -> str:
+def session_status(scheduled_at: datetime, duration_minutes: int, ended_at: datetime | None = None) -> str:
     """Returns 'upcoming', 'live', or 'ended' relative to now — a display
-    label only, independent of the actual started_at/ended_at gating."""
+    label. If the host has explicitly ended the session (ended_at set),
+    that always wins over the scheduled time window — a host ending a
+    session 20 minutes early should immediately show as 'ended', not
+    'live' just because the originally scheduled window hasn't elapsed."""
+    if ended_at:
+        return "ended"
     now = datetime.now(timezone.utc)
     if scheduled_at.tzinfo is None:
         scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
@@ -125,7 +130,23 @@ def render_host_room(join_link: str):
     safe_link = json.dumps(join_link).replace("</", "<\\/")
 
     html = f"""
-    <div id="dsiar-samba-container" style="height:620px;"></div>
+    <style>
+        #dsiar-samba-container {{
+            width: 100%;
+            height: 620px;
+            position: relative;
+            background: #000;
+        }}
+        #dsiar-samba-container iframe {{
+            width: 100% !important;
+            height: 100% !important;
+            position: absolute;
+            top: 0;
+            left: 0;
+            border: none;
+        }}
+    </style>
+    <div id="dsiar-samba-container"></div>
     <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
         <button id="dsiar-rec-start" style="padding:9px 16px;background:#16a34a;color:white;
             border:none;border-radius:6px;font-size:14px;cursor:pointer;">⏺ Start cloud recording</button>
