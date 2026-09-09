@@ -3,6 +3,7 @@ from bson import ObjectId
 
 from utils.auth import require_role
 from utils.db import courses_col, enrollments_col, live_sessions_col
+from utils.digital_samba_video import generate_join_link
 from utils.live_sessions import can_student_join, render_room, session_status
 
 user = require_role("student", "instructor", "admin")
@@ -52,7 +53,11 @@ for s in sessions:
             else:
                 st.caption(reason)
         else:
-            render_room(s["room_url"])
+            try:
+                join_link = generate_join_link(s["room_name"], user["name"], role="student")
+                render_room(join_link)
+            except Exception as e:
+                st.error(f"Couldn't join right now: {e}")
             if st.button("Leave session", key=f"leave_{sid}"):
                 st.session_state[joined_key] = False
                 st.rerun()
