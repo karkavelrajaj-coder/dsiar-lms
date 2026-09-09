@@ -113,19 +113,21 @@ def render_host_room(join_link: str):
 
     st.caption(
         "🎙️ Screen sharing and the whiteboard are built into the call — no login needed for anyone. "
-        "Cloud recording below uses your free 60 min/month. For longer sessions, record locally "
-        "with OBS Studio instead (no limit) and add it as a lesson afterward."
+        "⏱️ Free-plan cloud recordings auto-stop at 15 minutes each (60 free minutes total per month, "
+        "and deleting a recording later does NOT refund used minutes). For full-length sessions, record "
+        "locally with OBS Studio instead — no cap — and add it as a lesson afterward."
     )
 
     safe_link = json.dumps(join_link).replace("</", "<\\/")
 
     html = f"""
     <div id="dsiar-samba-container" style="height:620px;"></div>
-    <div style="margin-top:10px; display:flex; gap:10px;">
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
         <button id="dsiar-rec-start" style="padding:9px 16px;background:#16a34a;color:white;
             border:none;border-radius:6px;font-size:14px;cursor:pointer;">⏺ Start cloud recording</button>
         <button id="dsiar-rec-stop" style="padding:9px 16px;background:#6b7280;color:white;
             border:none;border-radius:6px;font-size:14px;cursor:pointer;" disabled>⏹ Stop recording</button>
+        <span id="dsiar-rec-timer" style="font-family:monospace;font-size:16px;font-weight:bold;color:#b91c1c;"></span>
     </div>
     <div id="dsiar-rec-note" style="margin-top:6px;font-size:12px;color:#888;"></div>
 
@@ -140,19 +142,57 @@ def render_host_room(join_link: str):
         const startBtn = document.getElementById('dsiar-rec-start');
         const stopBtn = document.getElementById('dsiar-rec-stop');
         const note = document.getElementById('dsiar-rec-note');
+        const timerEl = document.getElementById('dsiar-rec-timer');
+
+        const RECORDING_CAP_SECONDS = 15 * 60;
+        let secondsLeft = RECORDING_CAP_SECONDS;
+        let countdownInterval = null;
+
+        function formatTime(totalSeconds) {{
+            const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+            const s = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
+            return m + ':' + s;
+        }}
+
+        function stopCountdown() {{
+            if (countdownInterval) {{
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }}
+            timerEl.innerText = '';
+        }}
 
         sambaFrame.on('recordingStarted', () => {{
-            note.innerText = '🔴 Recording — counts toward your 60 free cloud minutes/month.';
+            note.innerText = '🔴 Recording — auto-stops at 15:00, counts toward your 60 free min/month.';
             startBtn.disabled = true;
             stopBtn.disabled = false;
+
+            secondsLeft = RECORDING_CAP_SECONDS;
+            timerEl.innerText = formatTime(secondsLeft);
+            countdownInterval = setInterval(() => {{
+                secondsLeft -= 1;
+                if (secondsLeft <= 0) {{
+                    timerEl.innerText = '00:00';
+                    stopCountdown();
+                }} else {{
+                    timerEl.innerText = formatTime(secondsLeft);
+                    if (secondsLeft <= 60) {{
+                        timerEl.style.color = '#b91c1c';
+                    }}
+                }}
+            }}, 1000);
         }});
         sambaFrame.on('recordingStopped', () => {{
+            stopCountdown();
             note.innerText = 'Recording stopped. Find it in your Digital Samba dashboard under Recordings once processed.';
             startBtn.disabled = false;
             stopBtn.disabled = true;
         }});
         sambaFrame.on('appError', (e) => {{
+            stopCountdown();
             note.innerText = 'Recording error: ' + (e && e.message ? e.message : 'unknown — recording may be unavailable right now.');
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
         }});
 
         startBtn.addEventListener('click', () => sambaFrame.startRecording());
