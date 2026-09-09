@@ -82,11 +82,14 @@ for s in sessions:
             else:
                 st.caption(reason)
         else:
-            try:
-                join_link = generate_join_link(s["room_name"], user["name"], role="student")
-                render_room(join_link)
-            except Exception as e:
-                st.error(f"Couldn't join right now: {e}")
+            if not s.get("room_id"):
+                st.error("This session needs to be restarted by the host before it can be joined (bug fix in progress).")
+            else:
+                try:
+                    join_link = generate_join_link(s["room_id"], user["name"], role="student")
+                    render_room(join_link)
+                except Exception as e:
+                    st.error(f"Couldn't join right now: {e}")
             if st.button("Leave session", key=f"leave_{sid}"):
                 st.session_state[joined_key] = False
                 st.rerun()
