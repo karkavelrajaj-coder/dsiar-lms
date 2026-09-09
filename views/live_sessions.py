@@ -5,10 +5,35 @@ from utils.auth import require_role
 from utils.db import courses_col, enrollments_col, live_sessions_col
 from utils.digital_samba_video import generate_join_link
 from utils.live_sessions import can_student_join, render_room, session_status
+from utils.timezones import (
+    DEFAULT_TIMEZONE,
+    format_in_tz,
+    get_user_timezone,
+    set_user_timezone,
+    timezone_options,
+    tz_display_label,
+)
 
 user = require_role("student", "instructor", "admin")
 
 st.title("🎥 Live sessions")
+
+# --- This viewer's own display timezone, saved so it's remembered next visit -
+tz_opts = timezone_options()
+saved_view_tz = get_user_timezone(user["id"])
+if saved_view_tz not in tz_opts:
+    tz_opts = [saved_view_tz] + tz_opts
+
+view_tz = st.selectbox(
+    "🌐 View times in",
+    tz_opts,
+    index=tz_opts.index(saved_view_tz),
+    format_func=lambda z: tz_display_label(z),
+    key="student_view_tz",
+)
+if view_tz != saved_view_tz:
+    set_user_timezone(user["id"], view_tz)
+    st.rerun()
 
 enrolled_course_ids = [e["course_id"] for e in enrollments_col().find({"user_id": user["id"]})]
 
@@ -30,13 +55,17 @@ for s in sessions:
     sid = str(s["_id"])
     course = courses_col().find_one({"_id": ObjectId(s["course_id"])})
     status = session_status(s["scheduled_at"], s["duration_minutes"])
+    original_tz = s.get("scheduled_tz", DEFAULT_TIMEZONE)
 
     with st.container(border=True):
         st.markdown(f"**{s['title']}**  ·  {status_badge[status]}")
+        time_line = format_in_tz(s["scheduled_at"], view_tz)
+        if view_tz != original_tz:
+            time_line += f"  (scheduled in {tz_display_label(original_tz)})"
         st.caption(
             f"Course: {course['title'] if course else 'Unknown'} · "
             f"Host: {s.get('host_name', 'Unknown')} · "
-            f"{s['scheduled_at'].strftime('%b %d, %Y at %I:%M %p UTC')} · "
+            f"{time_line} · "
             f"{s['duration_minutes']} min"
         )
         if s.get("description"):
