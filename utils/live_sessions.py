@@ -65,7 +65,7 @@ def can_student_join(session: dict) -> tuple[bool, str]:
         return False, "🔒 Join opens 10 minutes before the scheduled start time."
     if not session.get("started_at"):
         return False, "⏳ Waiting for the host to start this session — check back shortly."
-    if not session.get("room_name"):
+    if not session.get("room_id"):
         return False, "Session isn't ready yet — try again in a moment."
     return True, ""
 
