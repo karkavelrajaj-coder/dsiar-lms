@@ -4,20 +4,20 @@ import streamlit as st
 from bson import ObjectId
 
 from utils.auth import require_role
-from utils.daily_video import create_room, end_room_now
 from utils.db import courses_col, live_sessions_col
-from utils.live_sessions import generate_room_name, render_room, room_expiry_for, session_status
+from utils.digital_samba_video import create_room, end_room_now, generate_join_link
+from utils.live_sessions import generate_room_name, render_host_room, room_expiry_for, session_status
 
 user = require_role("admin", "instructor")
 
 st.title("🎥 Manage live sessions")
 st.caption("Admins schedule for every course. Instructors only schedule for courses assigned to them.")
 
-if "DAILY_API_KEY" not in st.secrets:
+if "DIGITALSAMBA_TEAM_ID" not in st.secrets or "DIGITALSAMBA_DEVELOPER_KEY" not in st.secrets:
     st.error(
-        "DAILY_API_KEY isn't set in secrets yet. Sign up free at https://dashboard.daily.co "
-        "(no credit card needed), grab your API key from the Developers tab, and add it to "
-        "Streamlit secrets before scheduling sessions."
+        "DIGITALSAMBA_TEAM_ID / DIGITALSAMBA_DEVELOPER_KEY aren't set in secrets yet. "
+        "Sign up free at https://dashboard.digitalsamba.com/signup (no card needed), "
+        "find both values under the Team tab, and add them to Streamlit secrets."
     )
     st.stop()
 
@@ -51,9 +51,9 @@ with st.expander("➕ Schedule a new live session"):
                 st.error("Give the session a title.")
             else:
                 scheduled_at = datetime.combine(session_date, session_time).replace(tzinfo=timezone.utc)
-                # The Daily room itself is created lazily when the host actually
-                # starts it, not here — avoids piling up unused rooms on the
-                # free tier for sessions that get rescheduled or cancelled.
+                # The actual Digital Samba room is created lazily when the host
+                # starts it, not here — avoids piling up unused rooms for
+                # sessions that get rescheduled or cancelled.
                 live_sessions_col().insert_one(
                     {
                         "course_id": course_map[course_name],
@@ -62,7 +62,6 @@ with st.expander("➕ Schedule a new live session"):
                         "scheduled_at": scheduled_at,
                         "duration_minutes": int(duration_minutes),
                         "room_name": generate_room_name(),
-                        "room_url": None,
                         "host_id": user["id"],
                         "host_name": user["name"],
                         "created_at": datetime.now(timezone.utc),
@@ -147,7 +146,6 @@ for s in sessions:
 
         started_at = s.get("started_at")
         ended_at = s.get("ended_at")
-        room_url = s.get("room_url")
 
         if ended_at:
             st.caption(f"✅ Ended at {ended_at.strftime('%I:%M %p UTC')}.")
@@ -161,31 +159,30 @@ for s in sessions:
             btn_label = "🔁 Start a new session" if ended_at else "▶️ Start / rejoin session"
             if st.button(btn_label, key=f"hostjoin_{sid}"):
                 try:
-                    if ended_at or not room_url:
-                        # First start, or restarting after a previous end —
-                        # either way, create a fresh Daily room.
-                        new_room_name = generate_room_name() if ended_at else s["room_name"]
+                    room_name = s["room_name"]
+                    if ended_at:
+                        # Previous room was deleted when ended — make a fresh one.
+                        room_name = generate_room_name()
+                        live_sessions_col().update_one({"_id": s["_id"]}, {"$set": {"room_name": room_name}})
+                    if ended_at or not started_at:
                         expiry = room_expiry_for(s["scheduled_at"], s["duration_minutes"])
-                        new_room_url = create_room(new_room_name, expiry)
+                        create_room(room_name, expiry)
                         live_sessions_col().update_one(
                             {"_id": s["_id"]},
-                            {
-                                "$set": {
-                                    "room_name": new_room_name,
-                                    "room_url": new_room_url,
-                                    "started_at": datetime.now(timezone.utc),
-                                },
-                                "$unset": {"ended_at": ""},
-                            },
+                            {"$set": {"started_at": datetime.now(timezone.utc)}, "$unset": {"ended_at": ""}},
                         )
                     st.session_state[hostjoin_key] = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"Couldn't create the video room: {e}")
         else:
-            # Refetch in case this is a fresh room just created above.
             current = live_sessions_col().find_one({"_id": s["_id"]})
-            render_room(current["room_url"])
+            try:
+                join_link = generate_join_link(current["room_name"], user["name"], role="teacher")
+                render_host_room(join_link)
+            except Exception as e:
+                st.error(f"Couldn't generate your join link: {e}")
+
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
                 if st.button("Leave (keep session open)", key=f"hostleave_{sid}"):
