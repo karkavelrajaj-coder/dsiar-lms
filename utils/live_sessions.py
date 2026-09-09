@@ -15,6 +15,10 @@ JOIN_OPENS_MINUTES_BEFORE = 10
 JOIN_STAYS_OPEN_MINUTES_AFTER_END = 30
 ROOM_LIFETIME_BUFFER_HOURS = 6  # auto-cleanup safety net if a host forgets to end it
 
+# Timezone conversion (scheduling in any zone, viewing in any zone) lives in
+# utils/timezones.py — this file only handles timezone-agnostic session
+# logic, working entirely in UTC internally.
+
 
 def generate_room_name() -> str:
     """A random, unguessable room name — Digital Samba's friendly_url must
