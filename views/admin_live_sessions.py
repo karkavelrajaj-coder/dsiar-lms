@@ -20,7 +20,13 @@ from utils.timezones import (
 
 user = require_role("admin", "instructor")
 
-st.title("🎥 Manage live sessions")
+title_col, refresh_col = st.columns([5, 1])
+with title_col:
+    st.title("🎥 Manage live sessions")
+with refresh_col:
+    st.write("")
+    if st.button("🔄 Refresh", use_container_width=True, help="This page doesn't update live — click to check for the latest status."):
+        st.rerun()
 st.caption("Admins schedule for every course. Instructors only schedule for courses assigned to them.")
 
 if "DIGITALSAMBA_TEAM_ID" not in st.secrets or "DIGITALSAMBA_DEVELOPER_KEY" not in st.secrets:
