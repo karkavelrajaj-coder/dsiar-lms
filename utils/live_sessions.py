@@ -105,15 +105,19 @@ def render_room(join_link: str):
 
 
 def render_host_room(join_link: str):
-    """Host-only variant with in-call Start/Stop cloud recording buttons,
-    using Digital Samba's official embedded-sdk (confirmed pattern:
-    DigitalSambaEmbedded.createControl({url, root}).load()). Free plan
-    includes 60 cloud recording minutes/month; beyond that, fall back to
-    free local recording (OBS Studio etc.) instead, since local recording
-    has no cap at all.
+    """Host-only room embed using Digital Samba's official embedded-sdk
+    (DigitalSambaEmbedded.createControl({url, root}).load()).
+
+    Recording is handled entirely by Digital Samba's own native in-call
+    toolbar (the record icon inside the call) — no custom button needed
+    here, since it would just duplicate that. Free plan: 15 min max per
+    recording, 60 free min/month total; beyond that, use free local
+    recording (OBS Studio etc.) instead, which has no cap at all.
 
     Ending the session for everyone is handled separately, server-side,
-    via digital_samba_video.end_room_now() — not through this embed.
+    via digital_samba_video.end_room_now() — the button for that lives
+    outside this embed, in the calling page, because it needs to update
+    our own database (not just the live call).
     """
     import json
 
@@ -121,10 +125,9 @@ def render_host_room(join_link: str):
     import streamlit.components.v1 as components
 
     st.caption(
-        "🎙️ Screen sharing and the whiteboard are built into the call — no login needed for anyone. "
-        "⏱️ Free-plan cloud recordings auto-stop at 15 minutes each (60 free minutes total per month, "
-        "and deleting a recording later does NOT refund used minutes). For full-length sessions, record "
-        "locally with OBS Studio instead — no cap — and add it as a lesson afterward."
+        "🎙️ Screen sharing, the whiteboard, and recording are all built into the call itself — "
+        "no login needed for anyone. Free-plan recordings cap at 15 min each (60 min/month total); "
+        "for longer sessions, record locally with OBS Studio instead (no cap) and add it as a lesson."
     )
 
     safe_link = json.dumps(join_link).replace("</", "<\\/")
@@ -147,14 +150,6 @@ def render_host_room(join_link: str):
         }}
     </style>
     <div id="dsiar-samba-container"></div>
-    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
-        <button id="dsiar-rec-start" style="padding:9px 16px;background:#16a34a;color:white;
-            border:none;border-radius:6px;font-size:14px;cursor:pointer;">⏺ Start cloud recording</button>
-        <button id="dsiar-rec-stop" style="padding:9px 16px;background:#6b7280;color:white;
-            border:none;border-radius:6px;font-size:14px;cursor:pointer;" disabled>⏹ Stop recording</button>
-        <span id="dsiar-rec-timer" style="font-family:monospace;font-size:16px;font-weight:bold;color:#b91c1c;"></span>
-    </div>
-    <div id="dsiar-rec-note" style="margin-top:6px;font-size:12px;color:#888;"></div>
 
     <script crossorigin src="https://unpkg.com/@digitalsamba/embedded-sdk"></script>
     <script>
@@ -163,65 +158,6 @@ def render_host_room(join_link: str):
             root: document.getElementById('dsiar-samba-container')
         }});
         sambaFrame.load();
-
-        const startBtn = document.getElementById('dsiar-rec-start');
-        const stopBtn = document.getElementById('dsiar-rec-stop');
-        const note = document.getElementById('dsiar-rec-note');
-        const timerEl = document.getElementById('dsiar-rec-timer');
-
-        const RECORDING_CAP_SECONDS = 15 * 60;
-        let secondsLeft = RECORDING_CAP_SECONDS;
-        let countdownInterval = null;
-
-        function formatTime(totalSeconds) {{
-            const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-            const s = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
-            return m + ':' + s;
-        }}
-
-        function stopCountdown() {{
-            if (countdownInterval) {{
-                clearInterval(countdownInterval);
-                countdownInterval = null;
-            }}
-            timerEl.innerText = '';
-        }}
-
-        sambaFrame.on('recordingStarted', () => {{
-            note.innerText = '🔴 Recording — auto-stops at 15:00, counts toward your 60 free min/month.';
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-
-            secondsLeft = RECORDING_CAP_SECONDS;
-            timerEl.innerText = formatTime(secondsLeft);
-            countdownInterval = setInterval(() => {{
-                secondsLeft -= 1;
-                if (secondsLeft <= 0) {{
-                    timerEl.innerText = '00:00';
-                    stopCountdown();
-                }} else {{
-                    timerEl.innerText = formatTime(secondsLeft);
-                    if (secondsLeft <= 60) {{
-                        timerEl.style.color = '#b91c1c';
-                    }}
-                }}
-            }}, 1000);
-        }});
-        sambaFrame.on('recordingStopped', () => {{
-            stopCountdown();
-            note.innerText = 'Recording stopped. Find it in your Digital Samba dashboard under Recordings once processed.';
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        }});
-        sambaFrame.on('appError', (e) => {{
-            stopCountdown();
-            note.innerText = 'Recording error: ' + (e && e.message ? e.message : 'unknown — recording may be unavailable right now.');
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        }});
-
-        startBtn.addEventListener('click', () => sambaFrame.startRecording());
-        stopBtn.addEventListener('click', () => sambaFrame.stopRecording());
     </script>
     """
-    components.html(html, height=740)
+    components.html(html, height=650)
