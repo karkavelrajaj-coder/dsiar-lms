@@ -5,6 +5,13 @@ what was broken before: Streamlit Cloud doesn't have DejaVu at the path we
 assumed, so every piece of text silently fell back to PIL's tiny default
 bitmap font. Bundled fonts always work, locally and on Streamlit Cloud.
 
+Logo and signature are also read directly from the repo's own assets/
+folder (not fetched over HTTP) — this is what actually matters if the
+GitHub repo is private: raw.githubusercontent.com only serves PUBLIC
+repos, so a private repo makes those URLs 404 instantly. Reading the file
+straight off Streamlit Cloud's own copy of the repo sidesteps that
+entirely, and is simpler and faster besides.
+
 Logo:      assets/dsiar-logo.png            (falls back to text wordmark)
 Signature: assets/signature.png (optional)  (falls back to a script-font
            rendering of the signer's name, so you don't need a scanned
@@ -15,16 +22,15 @@ import io
 import os
 from datetime import datetime
 
-import requests
 from PIL import Image, ImageDraw, ImageFont
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONT_DIR = os.path.join(REPO_ROOT, "assets", "fonts")
 
-LOGO_URL = "https://raw.githubusercontent.com/karkavelrajaj-coder/dsiar-lms/main/assets/dsiar-logo.png"
-# Optional: upload a real signature image (transparent PNG) to assets/signature.png
+LOGO_PATH = os.path.join(REPO_ROOT, "assets", "dsiar-logo.png")
+# Optional: add a real signature image (transparent PNG) at assets/signature.png
 # and it will be used automatically instead of the script-font fallback below.
-SIGNATURE_URL = "https://raw.githubusercontent.com/karkavelrajaj-coder/dsiar-lms/main/assets/signature.png"
+SIGNATURE_PATH = os.path.join(REPO_ROOT, "assets", "signature.png")
 SIGNER_NAME = "D'siar Tech"
 SIGNER_TITLE = "Authorized Signatory"
 
@@ -59,11 +65,15 @@ def _center_text(draw, y, text, font, fill, canvas_width=WIDTH):
     return bbox[3] - bbox[1]  # text height, for spacing calc
 
 
-def _fetch_image(url, max_width):
+def _load_local_image(path, max_width):
+    """Reads an image straight from the app's own filesystem — no network
+    call, so it works regardless of whether the GitHub repo is public or
+    private. Returns None (triggering the caller's fallback) if the file
+    simply doesn't exist yet, e.g. before a logo has been uploaded."""
     try:
-        resp = requests.get(url, timeout=5)
-        resp.raise_for_status()
-        img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+        if not os.path.isfile(path):
+            return None
+        img = Image.open(path).convert("RGBA")
         ratio = max_width / img.width
         img = img.resize((max_width, int(img.height * ratio)))
         return img
@@ -90,7 +100,7 @@ def build_certificate(student_name: str, course_title: str, cert_id: str, issued
 
     # --- Logo -----------------------------------------------------------------
     y = 90
-    logo = _fetch_image(LOGO_URL, max_width=150)
+    logo = _load_local_image(LOGO_PATH, max_width=150)
     if logo:
         img.paste(logo, (int((WIDTH - logo.width) / 2), y), logo)
         y += logo.height + 34
@@ -138,7 +148,7 @@ def build_certificate(student_name: str, course_title: str, cert_id: str, issued
 
     sig_block_w = 380
     sig_x = WIDTH - inner - 50 - sig_block_w
-    signature_img = _fetch_image(SIGNATURE_URL, max_width=sig_block_w)
+    signature_img = _load_local_image(SIGNATURE_PATH, max_width=sig_block_w)
     if signature_img:
         img.paste(signature_img, (sig_x + int((sig_block_w - signature_img.width) / 2), footer_y - 10), signature_img)
     else:
