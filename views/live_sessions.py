@@ -16,7 +16,13 @@ from utils.timezones import (
 
 user = require_role("student", "instructor", "admin")
 
-st.title("🎥 Live sessions")
+title_col, refresh_col = st.columns([5, 1])
+with title_col:
+    st.title("🎥 Live sessions")
+with refresh_col:
+    st.write("")
+    if st.button("🔄 Refresh", use_container_width=True, help="This page doesn't update live — click to check for the latest status."):
+        st.rerun()
 
 # --- This viewer's own display timezone, saved so it's remembered next visit -
 tz_opts = timezone_options()
